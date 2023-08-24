@@ -1,0 +1,29 @@
+[project]
+name = ""
+version = ""
+description = ""
+authors = [
+    {name = "hei.chtai", email = "nooobkevin@gmail.com"},
+]
+dependencies = [
+    "accelerate",
+    "transformers>=4.25.1",
+    "ftfy",
+    "tensorboard",
+    "Jinja2",
+    "torchvision>=0.15.2",
+    "clip-retrieval>=2.24.2",
+    "tqdm>=4.66.1",
+    "torch>=2.0.1",
+    "xformers>=0.0.21",
+    "diffusers @ git+https://github.com/huggingface/diffusers",
+]
+requires-python = ">=3.9"
+readme = "README.md"
+license = {text = "MIT"}
+
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
