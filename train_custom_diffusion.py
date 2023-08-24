@@ -51,7 +51,7 @@ from diffusers import (
     UNet2DConditionModel,
 )
 from diffusers.loaders import AttnProcsLayers
-from diffusers.models.attention_processor import CustomDiffusionAttnProcessor, CustomDiffusionXFormersAttnProcessor
+from attention_processor import CustomDiffusionAttnProcessor, CustomDiffusionXFormersAttnProcessor
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version, is_wandb_available
 from diffusers.utils.import_utils import is_xformers_available
@@ -134,10 +134,12 @@ def collate_fn(examples, with_prior_preservation):
     input_ids = torch.cat(input_ids, dim=0)
     pixel_values = torch.stack(pixel_values)
     mask = torch.stack(mask)
-    pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
+    pixel_values = pixel_values.to(
+        memory_format=torch.contiguous_format).float()
     mask = mask.to(memory_format=torch.contiguous_format).float()
 
-    batch = {"input_ids": input_ids, "pixel_values": pixel_values, "mask": mask.unsqueeze(1)}
+    batch = {"input_ids": input_ids,
+             "pixel_values": pixel_values, "mask": mask.unsqueeze(1)}
     return batch
 
 
@@ -196,15 +198,18 @@ class CustomDiffusionDataset(Dataset):
                 class_data_root = Path(concept["class_data_dir"])
                 if os.path.isdir(class_data_root):
                     class_images_path = list(class_data_root.iterdir())
-                    class_prompt = [concept["class_prompt"] for _ in range(len(class_images_path))]
+                    class_prompt = [concept["class_prompt"]
+                                    for _ in range(len(class_images_path))]
                 else:
                     with open(class_data_root, "r") as f:
                         class_images_path = f.read().splitlines()
                     with open(concept["class_prompt"], "r") as f:
                         class_prompt = f.read().splitlines()
 
-                class_img_path = [(x, y) for (x, y) in zip(class_images_path, class_prompt)]
-                self.class_images_path.extend(class_img_path[:num_class_images])
+                class_img_path = [(x, y) for (x, y) in zip(
+                    class_images_path, class_prompt)]
+                self.class_images_path.extend(
+                    class_img_path[:num_class_images])
 
         random.shuffle(self.instance_images_path)
         self.num_instance_images = len(self.instance_images_path)
@@ -215,8 +220,10 @@ class CustomDiffusionDataset(Dataset):
         self.image_transforms = transforms.Compose(
             [
                 self.flip,
-                transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR),
-                transforms.CenterCrop(size) if center_crop else transforms.RandomCrop(size),
+                transforms.Resize(
+                    size, interpolation=transforms.InterpolationMode.BILINEAR),
+                transforms.CenterCrop(
+                    size) if center_crop else transforms.RandomCrop(size),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
             ]
@@ -230,25 +237,27 @@ class CustomDiffusionDataset(Dataset):
         factor = self.size // self.mask_size
         if scale > self.size:
             outer, inner = scale, self.size
-        top, left = np.random.randint(0, outer - inner + 1), np.random.randint(0, outer - inner + 1)
+        top, left = np.random.randint(
+            0, outer - inner + 1), np.random.randint(0, outer - inner + 1)
         image = image.resize((scale, scale), resample=resample)
         image = np.array(image).astype(np.uint8)
         image = (image / 127.5 - 1.0).astype(np.float32)
         instance_image = np.zeros((self.size, self.size, 3), dtype=np.float32)
         mask = np.zeros((self.size // factor, self.size // factor))
         if scale > self.size:
-            instance_image = image[top : top + inner, left : left + inner, :]
+            instance_image = image[top: top + inner, left: left + inner, :]
             mask = np.ones((self.size // factor, self.size // factor))
         else:
-            instance_image[top : top + inner, left : left + inner, :] = image
+            instance_image[top: top + inner, left: left + inner, :] = image
             mask[
-                top // factor + 1 : (top + scale) // factor - 1, left // factor + 1 : (left + scale) // factor - 1
+                top // factor + 1: (top + scale) // factor - 1, left // factor + 1: (left + scale) // factor - 1
             ] = 1.0
         return instance_image, mask
 
     def __getitem__(self, index):
         example = {}
-        instance_image, instance_prompt = self.instance_images_path[index % self.num_instance_images]
+        instance_image, instance_prompt = self.instance_images_path[index %
+                                                                    self.num_instance_images]
         instance_image = Image.open(instance_image)
         if not instance_image.mode == "RGB":
             instance_image = instance_image.convert("RGB")
@@ -262,14 +271,18 @@ class CustomDiffusionDataset(Dataset):
                 if np.random.uniform() < 0.66
                 else np.random.randint(int(1.2 * self.size), int(1.4 * self.size))
             )
-        instance_image, mask = self.preprocess(instance_image, random_scale, self.interpolation)
+        instance_image, mask = self.preprocess(
+            instance_image, random_scale, self.interpolation)
 
         if random_scale < 0.6 * self.size:
-            instance_prompt = np.random.choice(["a far away ", "very small "]) + instance_prompt
+            instance_prompt = np.random.choice(
+                ["a far away ", "very small "]) + instance_prompt
         elif random_scale > self.size:
-            instance_prompt = np.random.choice(["zoomed in ", "close up "]) + instance_prompt
+            instance_prompt = np.random.choice(
+                ["zoomed in ", "close up "]) + instance_prompt
 
-        example["instance_images"] = torch.from_numpy(instance_image).permute(2, 0, 1)
+        example["instance_images"] = torch.from_numpy(
+            instance_image).permute(2, 0, 1)
         example["mask"] = torch.from_numpy(mask)
         example["instance_prompt_ids"] = self.tokenizer(
             instance_prompt,
@@ -280,7 +293,8 @@ class CustomDiffusionDataset(Dataset):
         ).input_ids
 
         if self.with_prior_preservation:
-            class_image, class_prompt = self.class_images_path[index % self.num_class_images]
+            class_image, class_prompt = self.class_images_path[index %
+                                                               self.num_class_images]
             class_image = Image.open(class_image)
             if not class_image.mode == "RGB":
                 class_image = class_image.convert("RGB")
@@ -300,20 +314,23 @@ class CustomDiffusionDataset(Dataset):
 def save_new_embed(text_encoder, modifier_token_id, accelerator, args, output_dir, safe_serialization=True):
     """Saves the new token embeddings from the text encoder."""
     logger.info("Saving embeddings")
-    learned_embeds = accelerator.unwrap_model(text_encoder).get_input_embeddings().weight
+    learned_embeds = accelerator.unwrap_model(
+        text_encoder).get_input_embeddings().weight
     for x, y in zip(modifier_token_id, args.modifier_token):
         learned_embeds_dict = {}
         learned_embeds_dict[y] = learned_embeds[x]
         filename = f"{output_dir}/{y}.bin"
 
         if safe_serialization:
-            safetensors.torch.save_file(learned_embeds_dict, filename, metadata={"format": "pt"})
+            safetensors.torch.save_file(
+                learned_embeds_dict, filename, metadata={"format": "pt"})
         else:
             torch.save(learned_embeds_dict, filename)
 
 
 def parse_args(input_args=None):
-    parser = argparse.ArgumentParser(description="Custom Diffusion training script.")
+    parser = argparse.ArgumentParser(
+        description="Custom Diffusion training script.")
     parser.add_argument(
         "--pretrained_model_name_or_path",
         type=str,
@@ -391,7 +408,8 @@ def parse_args(input_args=None):
         action="store_true",
         help="real images as prior.",
     )
-    parser.add_argument("--prior_loss_weight", type=float, default=1.0, help="The weight of prior preservation loss.")
+    parser.add_argument("--prior_loss_weight", type=float,
+                        default=1.0, help="The weight of prior preservation loss.")
     parser.add_argument(
         "--num_class_images",
         type=int,
@@ -407,7 +425,8 @@ def parse_args(input_args=None):
         default="custom-diffusion-model",
         help="The output directory where the model predictions and checkpoints will be written.",
     )
-    parser.add_argument("--seed", type=int, default=42, help="A seed for reproducible training.")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="A seed for reproducible training.")
     parser.add_argument(
         "--resolution",
         type=int,
@@ -517,13 +536,20 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--use_8bit_adam", action="store_true", help="Whether or not to use 8-bit Adam from bitsandbytes."
     )
-    parser.add_argument("--adam_beta1", type=float, default=0.9, help="The beta1 parameter for the Adam optimizer.")
-    parser.add_argument("--adam_beta2", type=float, default=0.999, help="The beta2 parameter for the Adam optimizer.")
-    parser.add_argument("--adam_weight_decay", type=float, default=1e-2, help="Weight decay to use.")
-    parser.add_argument("--adam_epsilon", type=float, default=1e-08, help="Epsilon value for the Adam optimizer")
-    parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
-    parser.add_argument("--push_to_hub", action="store_true", help="Whether or not to push the model to the Hub.")
-    parser.add_argument("--hub_token", type=str, default=None, help="The token to use to push to the Model Hub.")
+    parser.add_argument("--adam_beta1", type=float, default=0.9,
+                        help="The beta1 parameter for the Adam optimizer.")
+    parser.add_argument("--adam_beta2", type=float, default=0.999,
+                        help="The beta2 parameter for the Adam optimizer.")
+    parser.add_argument("--adam_weight_decay", type=float,
+                        default=1e-2, help="Weight decay to use.")
+    parser.add_argument("--adam_epsilon", type=float, default=1e-08,
+                        help="Epsilon value for the Adam optimizer")
+    parser.add_argument("--max_grad_norm", default=1.0,
+                        type=float, help="Max gradient norm.")
+    parser.add_argument("--push_to_hub", action="store_true",
+                        help="Whether or not to push the model to the Hub.")
+    parser.add_argument("--hub_token", type=str, default=None,
+                        help="The token to use to push to the Model Hub.")
     parser.add_argument(
         "--hub_model_id",
         type=str,
@@ -583,7 +609,8 @@ def parse_args(input_args=None):
         default=None,
         help="Path to json containing multiple concepts, will overwrite parameters like instance_prompt, class_prompt, etc.",
     )
-    parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
+    parser.add_argument("--local_rank", type=int, default=-1,
+                        help="For distributed training: local_rank")
     parser.add_argument(
         "--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers."
     )
@@ -605,7 +632,8 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--initializer_token", type=str, default="ktn+pll+ucd", help="A token to use as initializer word."
     )
-    parser.add_argument("--hflip", action="store_true", help="Apply horizontal flip data augmentation.")
+    parser.add_argument("--hflip", action="store_true",
+                        help="Apply horizontal flip data augmentation.")
     parser.add_argument(
         "--noaug",
         action="store_true",
@@ -629,15 +657,18 @@ def parse_args(input_args=None):
     if args.with_prior_preservation:
         if args.concepts_list is None:
             if args.class_data_dir is None:
-                raise ValueError("You must specify a data directory for class images.")
+                raise ValueError(
+                    "You must specify a data directory for class images.")
             if args.class_prompt is None:
                 raise ValueError("You must specify prompt for class images.")
     else:
         # logger is not available yet
         if args.class_data_dir is not None:
-            warnings.warn("You need not use --class_data_dir without --with_prior_preservation.")
+            warnings.warn(
+                "You need not use --class_data_dir without --with_prior_preservation.")
         if args.class_prompt is not None:
-            warnings.warn("You need not use --class_prompt without --with_prior_preservation.")
+            warnings.warn(
+                "You need not use --class_prompt without --with_prior_preservation.")
 
     return args
 
@@ -645,7 +676,8 @@ def parse_args(input_args=None):
 def main(args):
     logging_dir = Path(args.output_dir, args.logging_dir)
 
-    accelerator_project_config = ProjectConfiguration(project_dir=args.output_dir, logging_dir=logging_dir)
+    accelerator_project_config = ProjectConfiguration(
+        project_dir=args.output_dir, logging_dir=logging_dir)
 
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
@@ -656,7 +688,8 @@ def main(args):
 
     if args.report_to == "wandb":
         if not is_wandb_available():
-            raise ImportError("Make sure to install wandb if you want to use it for logging during training.")
+            raise ImportError(
+                "Make sure to install wandb if you want to use it for logging during training.")
         import wandb
 
     # Currently, it's not possible to do gradient accumulation when training two models with accelerate.accumulate
@@ -708,7 +741,8 @@ def main(args):
                     class_images_dir / "images"
                 ).exists(), f"Please run: python retrieve.py --class_prompt \"{concept['class_prompt']}\" --class_data_dir {class_images_dir} --num_class_images {args.num_class_images}"
                 assert (
-                    len(list((class_images_dir / "images").iterdir())) == args.num_class_images
+                    len(list((class_images_dir / "images").iterdir())
+                        ) == args.num_class_images
                 ), f"Please run: python retrieve.py --class_prompt \"{concept['class_prompt']}\" --class_data_dir {class_images_dir} --num_class_images {args.num_class_images}"
                 assert (
                     class_images_dir / "caption.txt"
@@ -716,8 +750,10 @@ def main(args):
                 assert (
                     class_images_dir / "images.txt"
                 ).exists(), f"Please run: python retrieve.py --class_prompt \"{concept['class_prompt']}\" --class_data_dir {class_images_dir} --num_class_images {args.num_class_images}"
-                concept["class_prompt"] = os.path.join(class_images_dir, "caption.txt")
-                concept["class_data_dir"] = os.path.join(class_images_dir, "images.txt")
+                concept["class_prompt"] = os.path.join(
+                    class_images_dir, "caption.txt")
+                concept["class_data_dir"] = os.path.join(
+                    class_images_dir, "images.txt")
                 args.concepts_list[i] = concept
                 accelerator.wait_for_everyone()
             else:
@@ -740,10 +776,13 @@ def main(args):
                     pipeline.set_progress_bar_config(disable=True)
 
                     num_new_images = args.num_class_images - cur_class_images
-                    logger.info(f"Number of class images to sample: {num_new_images}.")
+                    logger.info(
+                        f"Number of class images to sample: {num_new_images}.")
 
-                    sample_dataset = PromptDataset(args.class_prompt, num_new_images)
-                    sample_dataloader = torch.utils.data.DataLoader(sample_dataset, batch_size=args.sample_batch_size)
+                    sample_dataset = PromptDataset(
+                        args.class_prompt, num_new_images)
+                    sample_dataloader = torch.utils.data.DataLoader(
+                        sample_dataset, batch_size=args.sample_batch_size)
 
                     sample_dataloader = accelerator.prepare(sample_dataloader)
                     pipeline.to(accelerator.device)
@@ -756,9 +795,11 @@ def main(args):
                         images = pipeline(example["prompt"]).images
 
                         for i, image in enumerate(images):
-                            hash_image = hashlib.sha1(image.tobytes()).hexdigest()
+                            hash_image = hashlib.sha1(
+                                image.tobytes()).hexdigest()
                             image_filename = (
-                                class_images_dir / f"{example['index'][i] + cur_class_images}-{hash_image}.jpg"
+                                class_images_dir /
+                                f"{example['index'][i] + cur_class_images}-{hash_image}.jpg"
                             )
                             image.save(image_filename)
 
@@ -792,14 +833,17 @@ def main(args):
         )
 
     # import correct text encoder class
-    text_encoder_cls = import_model_class_from_model_name_or_path(args.pretrained_model_name_or_path, args.revision)
+    text_encoder_cls = import_model_class_from_model_name_or_path(
+        args.pretrained_model_name_or_path, args.revision)
 
     # Load scheduler and models
-    noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
+    noise_scheduler = DDPMScheduler.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="scheduler")
     text_encoder = text_encoder_cls.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision
     )
-    vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision)
+    vae = AutoencoderKL.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision)
     unet = UNet2DConditionModel.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
     )
@@ -812,9 +856,11 @@ def main(args):
         args.modifier_token = args.modifier_token.split("+")
         args.initializer_token = args.initializer_token.split("+")
         if len(args.modifier_token) > len(args.initializer_token):
-            raise ValueError("You must specify + separated initializer token for each modifier token.")
+            raise ValueError(
+                "You must specify + separated initializer token for each modifier token.")
         for modifier_token, initializer_token in zip(
-            args.modifier_token, args.initializer_token[: len(args.modifier_token)]
+            args.modifier_token, args.initializer_token[: len(
+                args.modifier_token)]
         ):
             # Add the placeholder token in tokenizer
             num_added_tokens = tokenizer.add_tokens(modifier_token)
@@ -825,14 +871,17 @@ def main(args):
                 )
 
             # Convert the initializer_token, placeholder_token to ids
-            token_ids = tokenizer.encode([initializer_token], add_special_tokens=False)
+            token_ids = tokenizer.encode(
+                [initializer_token], add_special_tokens=False)
             print(token_ids)
             # Check if initializer_token is a single token or a sequence of tokens
             if len(token_ids) > 1:
-                raise ValueError("The initializer token must be a single token.")
+                raise ValueError(
+                    "The initializer token must be a single token.")
 
             initializer_token_id.append(token_ids[0])
-            modifier_token_id.append(tokenizer.convert_tokens_to_ids(modifier_token))
+            modifier_token_id.append(
+                tokenizer.convert_tokens_to_ids(modifier_token))
 
         # Resize the token embeddings as we are adding new special tokens to the tokenizer
         text_encoder.resize_token_embeddings(len(tokenizer))
@@ -882,7 +931,8 @@ def main(args):
                 )
             attention_class = CustomDiffusionXFormersAttnProcessor
         else:
-            raise ValueError("xformers is not available. Make sure it is installed correctly")
+            raise ValueError(
+                "xformers is not available. Make sure it is installed correctly")
 
     # now we will add new Custom Diffusion weights to the attention layers
     # It's important to realize here how many attention weights will be added and of which sizes
@@ -904,12 +954,14 @@ def main(args):
 
     st = unet.state_dict()
     for name, _ in unet.attn_processors.items():
-        cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
+        cross_attention_dim = None if name.endswith(
+            "attn1.processor") else unet.config.cross_attention_dim
         if name.startswith("mid_block"):
             hidden_size = unet.config.block_out_channels[-1]
         elif name.startswith("up_blocks"):
             block_id = int(name[len("up_blocks.")])
-            hidden_size = list(reversed(unet.config.block_out_channels))[block_id]
+            hidden_size = list(reversed(unet.config.block_out_channels))[
+                block_id]
         elif name.startswith("down_blocks"):
             block_id = int(name[len("down_blocks.")])
             hidden_size = unet.config.block_out_channels[block_id]
@@ -920,8 +972,10 @@ def main(args):
         }
         if train_q_out:
             weights["to_q_custom_diffusion.weight"] = st[layer_name + ".to_q.weight"]
-            weights["to_out_custom_diffusion.0.weight"] = st[layer_name + ".to_out.0.weight"]
-            weights["to_out_custom_diffusion.0.bias"] = st[layer_name + ".to_out.0.bias"]
+            weights["to_out_custom_diffusion.0.weight"] = st[layer_name +
+                                                             ".to_out.0.weight"]
+            weights["to_out_custom_diffusion.0.bias"] = st[layer_name +
+                                                           ".to_out.0.bias"]
         if cross_attention_dim is not None:
             custom_diffusion_attn_procs[name] = attention_class(
                 train_kv=train_kv,
@@ -954,7 +1008,8 @@ def main(args):
 
     if args.scale_lr:
         args.learning_rate = (
-            args.learning_rate * args.gradient_accumulation_steps * args.train_batch_size * accelerator.num_processes
+            args.learning_rate * args.gradient_accumulation_steps *
+            args.train_batch_size * accelerator.num_processes
         )
         if args.with_prior_preservation:
             args.learning_rate = args.learning_rate * 2.0
@@ -974,7 +1029,8 @@ def main(args):
 
     # Optimizer creation
     optimizer = optimizer_class(
-        itertools.chain(text_encoder.get_input_embeddings().parameters(), custom_diffusion_layers.parameters())
+        itertools.chain(text_encoder.get_input_embeddings(
+        ).parameters(), custom_diffusion_layers.parameters())
         if args.modifier_token is not None
         else custom_diffusion_layers.parameters(),
         lr=args.learning_rate,
@@ -990,7 +1046,8 @@ def main(args):
         with_prior_preservation=args.with_prior_preservation,
         size=args.resolution,
         mask_size=vae.encode(
-            torch.randn(1, 3, args.resolution, args.resolution).to(dtype=weight_dtype).to(accelerator.device)
+            torch.randn(1, 3, args.resolution, args.resolution).to(
+                dtype=weight_dtype).to(accelerator.device)
         )
         .latent_dist.sample()
         .size()[-1],
@@ -1004,13 +1061,15 @@ def main(args):
         train_dataset,
         batch_size=args.train_batch_size,
         shuffle=True,
-        collate_fn=lambda examples: collate_fn(examples, args.with_prior_preservation),
+        collate_fn=lambda examples: collate_fn(
+            examples, args.with_prior_preservation),
         num_workers=args.dataloader_num_workers,
     )
 
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
+    num_update_steps_per_epoch = math.ceil(
+        len(train_dataloader) / args.gradient_accumulation_steps)
     if args.max_train_steps is None:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
         overrode_max_train_steps = True
@@ -1033,22 +1092,28 @@ def main(args):
         )
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
+    num_update_steps_per_epoch = math.ceil(
+        len(train_dataloader) / args.gradient_accumulation_steps)
     if overrode_max_train_steps:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
     # Afterwards we recalculate our number of training epochs
-    args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
+    args.num_train_epochs = math.ceil(
+        args.max_train_steps / num_update_steps_per_epoch)
 
     # Train!
-    total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
+    total_batch_size = args.train_batch_size * \
+        accelerator.num_processes * args.gradient_accumulation_steps
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
     logger.info(f"  Num batches each epoch = {len(train_dataloader)}")
     logger.info(f"  Num Epochs = {args.num_train_epochs}")
-    logger.info(f"  Instantaneous batch size per device = {args.train_batch_size}")
-    logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
-    logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
+    logger.info(
+        f"  Instantaneous batch size per device = {args.train_batch_size}")
+    logger.info(
+        f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
+    logger.info(
+        f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     logger.info(f"  Total optimization steps = {args.max_train_steps}")
     global_step = 0
     first_epoch = 0
@@ -1076,10 +1141,12 @@ def main(args):
 
             resume_global_step = global_step * args.gradient_accumulation_steps
             first_epoch = global_step // num_update_steps_per_epoch
-            resume_step = resume_global_step % (num_update_steps_per_epoch * args.gradient_accumulation_steps)
+            resume_step = resume_global_step % (
+                num_update_steps_per_epoch * args.gradient_accumulation_steps)
 
     # Only show the progress bar once on each machine.
-    progress_bar = tqdm(range(global_step, args.max_train_steps), disable=not accelerator.is_local_main_process)
+    progress_bar = tqdm(range(global_step, args.max_train_steps),
+                        disable=not accelerator.is_local_main_process)
     progress_bar.set_description("Steps")
 
     for epoch in range(first_epoch, args.num_train_epochs):
@@ -1095,52 +1162,64 @@ def main(args):
 
             with accelerator.accumulate(unet), accelerator.accumulate(text_encoder):
                 # Convert images to latent space
-                latents = vae.encode(batch["pixel_values"].to(dtype=weight_dtype)).latent_dist.sample()
+                latents = vae.encode(batch["pixel_values"].to(
+                    dtype=weight_dtype)).latent_dist.sample()
                 latents = latents * vae.config.scaling_factor
 
                 # Sample noise that we'll add to the latents
                 noise = torch.randn_like(latents)
                 bsz = latents.shape[0]
                 # Sample a random timestep for each image
-                timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (bsz,), device=latents.device)
+                timesteps = torch.randint(
+                    0, noise_scheduler.config.num_train_timesteps, (bsz,), device=latents.device)
                 timesteps = timesteps.long()
 
                 # Add noise to the latents according to the noise magnitude at each timestep
                 # (this is the forward diffusion process)
-                noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+                noisy_latents = noise_scheduler.add_noise(
+                    latents, noise, timesteps)
 
                 # Get the text embedding for conditioning
                 encoder_hidden_states = text_encoder(batch["input_ids"])[0]
 
                 # Predict the noise residual
-                model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
+                model_pred = unet(noisy_latents, timesteps,
+                                  encoder_hidden_states).sample
 
                 # Get the target for loss depending on the prediction type
                 if noise_scheduler.config.prediction_type == "epsilon":
                     target = noise
                 elif noise_scheduler.config.prediction_type == "v_prediction":
-                    target = noise_scheduler.get_velocity(latents, noise, timesteps)
+                    target = noise_scheduler.get_velocity(
+                        latents, noise, timesteps)
                 else:
-                    raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
+                    raise ValueError(
+                        f"Unknown prediction type {noise_scheduler.config.prediction_type}")
 
                 if args.with_prior_preservation:
                     # Chunk the noise and model_pred into two parts and compute the loss on each part separately.
-                    model_pred, model_pred_prior = torch.chunk(model_pred, 2, dim=0)
+                    model_pred, model_pred_prior = torch.chunk(
+                        model_pred, 2, dim=0)
                     target, target_prior = torch.chunk(target, 2, dim=0)
                     mask = torch.chunk(batch["mask"], 2, dim=0)[0]
                     # Compute instance loss
-                    loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
-                    loss = ((loss * mask).sum([1, 2, 3]) / mask.sum([1, 2, 3])).mean()
+                    loss = F.mse_loss(model_pred.float(),
+                                      target.float(), reduction="none")
+                    loss = (
+                        (loss * mask).sum([1, 2, 3]) / mask.sum([1, 2, 3])).mean()
 
                     # Compute prior loss
-                    prior_loss = F.mse_loss(model_pred_prior.float(), target_prior.float(), reduction="mean")
+                    prior_loss = F.mse_loss(
+                        model_pred_prior.float(), target_prior.float(), reduction="mean")
 
                     # Add the prior loss to the instance loss.
                     loss = loss + args.prior_loss_weight * prior_loss
                 else:
                     mask = batch["mask"]
-                    loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
-                    loss = ((loss * mask).sum([1, 2, 3]) / mask.sum([1, 2, 3])).mean()
+                    loss = F.mse_loss(model_pred.float(),
+                                      target.float(), reduction="none")
+                    loss = (
+                        (loss * mask).sum([1, 2, 3]) / mask.sum([1, 2, 3])).mean()
                 accelerator.backward(loss)
                 # Zero out the gradients for all token embeddings except the newly added
                 # embeddings for the concept, as we only want to optimize the concept embeddings
@@ -1150,10 +1229,12 @@ def main(args):
                     else:
                         grads_text_encoder = text_encoder.get_input_embeddings().weight.grad
                     # Get the index for tokens that we want to zero the grads for
-                    index_grads_to_zero = torch.arange(len(tokenizer)) != modifier_token_id[0]
+                    index_grads_to_zero = torch.arange(
+                        len(tokenizer)) != modifier_token_id[0]
                     for i in range(len(modifier_token_id[1:])):
                         index_grads_to_zero = index_grads_to_zero & (
-                            torch.arange(len(tokenizer)) != modifier_token_id[i]
+                            torch.arange(
+                                len(tokenizer)) != modifier_token_id[i]
                         )
                     grads_text_encoder.data[index_grads_to_zero, :] = grads_text_encoder.data[
                         index_grads_to_zero, :
@@ -1161,11 +1242,13 @@ def main(args):
 
                 if accelerator.sync_gradients:
                     params_to_clip = (
-                        itertools.chain(text_encoder.parameters(), custom_diffusion_layers.parameters())
+                        itertools.chain(text_encoder.parameters(
+                        ), custom_diffusion_layers.parameters())
                         if args.modifier_token is not None
                         else custom_diffusion_layers.parameters()
                     )
-                    accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
+                    accelerator.clip_grad_norm_(
+                        params_to_clip, args.max_grad_norm)
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad(set_to_none=args.set_grads_to_none)
@@ -1180,28 +1263,35 @@ def main(args):
                         # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
                         if args.checkpoints_total_limit is not None:
                             checkpoints = os.listdir(args.output_dir)
-                            checkpoints = [d for d in checkpoints if d.startswith("checkpoint")]
-                            checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))
+                            checkpoints = [
+                                d for d in checkpoints if d.startswith("checkpoint")]
+                            checkpoints = sorted(
+                                checkpoints, key=lambda x: int(x.split("-")[1]))
 
                             # before we save the new checkpoint, we need to have at _most_ `checkpoints_total_limit - 1` checkpoints
                             if len(checkpoints) >= args.checkpoints_total_limit:
-                                num_to_remove = len(checkpoints) - args.checkpoints_total_limit + 1
+                                num_to_remove = len(
+                                    checkpoints) - args.checkpoints_total_limit + 1
                                 removing_checkpoints = checkpoints[0:num_to_remove]
 
                                 logger.info(
                                     f"{len(checkpoints)} checkpoints already exist, removing {len(removing_checkpoints)} checkpoints"
                                 )
-                                logger.info(f"removing checkpoints: {', '.join(removing_checkpoints)}")
+                                logger.info(
+                                    f"removing checkpoints: {', '.join(removing_checkpoints)}")
 
                                 for removing_checkpoint in removing_checkpoints:
-                                    removing_checkpoint = os.path.join(args.output_dir, removing_checkpoint)
+                                    removing_checkpoint = os.path.join(
+                                        args.output_dir, removing_checkpoint)
                                     shutil.rmtree(removing_checkpoint)
 
-                        save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
+                        save_path = os.path.join(
+                            args.output_dir, f"checkpoint-{global_step}")
                         accelerator.save_state(save_path)
                         logger.info(f"Saved state to {save_path}")
 
-            logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
+            logs = {"loss": loss.detach().item(
+            ), "lr": lr_scheduler.get_last_lr()[0]}
             progress_bar.set_postfix(**logs)
             accelerator.log(logs, step=global_step)
 
@@ -1223,26 +1313,32 @@ def main(args):
                     revision=args.revision,
                     torch_dtype=weight_dtype,
                 )
-                pipeline.scheduler = DPMSolverMultistepScheduler.from_config(pipeline.scheduler.config)
+                pipeline.scheduler = DPMSolverMultistepScheduler.from_config(
+                    pipeline.scheduler.config)
                 pipeline = pipeline.to(accelerator.device)
                 pipeline.set_progress_bar_config(disable=True)
 
                 # run inference
-                generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
+                generator = torch.Generator(
+                    device=accelerator.device).manual_seed(args.seed)
                 images = [
-                    pipeline(args.validation_prompt, num_inference_steps=25, generator=generator, eta=1.0).images[0]
+                    pipeline(args.validation_prompt, num_inference_steps=25,
+                             generator=generator, eta=1.0).images[0]
                     for _ in range(args.num_validation_images)
                 ]
 
                 for tracker in accelerator.trackers:
                     if tracker.name == "tensorboard":
-                        np_images = np.stack([np.asarray(img) for img in images])
-                        tracker.writer.add_images("validation", np_images, epoch, dataformats="NHWC")
+                        np_images = np.stack([np.asarray(img)
+                                             for img in images])
+                        tracker.writer.add_images(
+                            "validation", np_images, epoch, dataformats="NHWC")
                     if tracker.name == "wandb":
                         tracker.log(
                             {
                                 "validation": [
-                                    wandb.Image(image, caption=f"{i}: {args.validation_prompt}")
+                                    wandb.Image(
+                                        image, caption=f"{i}: {args.validation_prompt}")
                                     for i, image in enumerate(images)
                                 ]
                             }
@@ -1255,7 +1351,8 @@ def main(args):
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
         unet = unet.to(torch.float32)
-        unet.save_attn_procs(args.output_dir, safe_serialization=not args.no_safe_serialization)
+        unet.save_attn_procs(
+            args.output_dir, safe_serialization=not args.no_safe_serialization)
         save_new_embed(
             text_encoder,
             modifier_token_id,
@@ -1270,7 +1367,8 @@ def main(args):
         pipeline = DiffusionPipeline.from_pretrained(
             args.pretrained_model_name_or_path, revision=args.revision, torch_dtype=weight_dtype
         )
-        pipeline.scheduler = DPMSolverMultistepScheduler.from_config(pipeline.scheduler.config)
+        pipeline.scheduler = DPMSolverMultistepScheduler.from_config(
+            pipeline.scheduler.config)
         pipeline = pipeline.to(accelerator.device)
 
         # load attention processors
@@ -1282,25 +1380,30 @@ def main(args):
         pipeline.unet.load_attn_procs(args.output_dir, weight_name=weight_name)
         for token in args.modifier_token:
             token_weight_name = f"{token}.safetensors" if not args.no_safe_serialization else f"{token}.bin"
-            pipeline.load_textual_inversion(args.output_dir, weight_name=token_weight_name)
+            pipeline.load_textual_inversion(
+                args.output_dir, weight_name=token_weight_name)
 
         # run inference
         if args.validation_prompt and args.num_validation_images > 0:
-            generator = torch.Generator(device=accelerator.device).manual_seed(args.seed) if args.seed else None
+            generator = torch.Generator(device=accelerator.device).manual_seed(
+                args.seed) if args.seed else None
             images = [
-                pipeline(args.validation_prompt, num_inference_steps=25, generator=generator, eta=1.0).images[0]
+                pipeline(args.validation_prompt, num_inference_steps=25,
+                         generator=generator, eta=1.0).images[0]
                 for _ in range(args.num_validation_images)
             ]
 
             for tracker in accelerator.trackers:
                 if tracker.name == "tensorboard":
                     np_images = np.stack([np.asarray(img) for img in images])
-                    tracker.writer.add_images("test", np_images, epoch, dataformats="NHWC")
+                    tracker.writer.add_images(
+                        "test", np_images, epoch, dataformats="NHWC")
                 if tracker.name == "wandb":
                     tracker.log(
                         {
                             "test": [
-                                wandb.Image(image, caption=f"{i}: {args.validation_prompt}")
+                                wandb.Image(
+                                    image, caption=f"{i}: {args.validation_prompt}")
                                 for i, image in enumerate(images)
                             ]
                         }
