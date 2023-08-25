@@ -918,7 +918,7 @@ def main(args):
         text_encoder.to(accelerator.device, dtype=weight_dtype)
     unet.to(accelerator.device, dtype=weight_dtype)
     vae.to(accelerator.device, dtype=weight_dtype)
-
+    # TODO: Define PerfusionAttnProcessor here
     attention_class = CustomDiffusionAttnProcessor
     if args.enable_xformers_memory_efficient_attention:
         if is_xformers_available():
@@ -934,6 +934,7 @@ def main(args):
             raise ValueError(
                 "xformers is not available. Make sure it is installed correctly")
 
+    # TODO: Add support for only train value projection layers
     # now we will add new Custom Diffusion weights to the attention layers
     # It's important to realize here how many attention weights will be added and of which sizes
     # The sizes of the attention layers consist only of two different variables:

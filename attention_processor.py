@@ -1513,6 +1513,8 @@ class CustomDiffusionXFormersAttnProcessor(nn.Module):
     def __init__(
         self,
         train_kv=True,
+        train_k=True,
+        train_v=True,
         train_q_out=False,
         hidden_size=None,
         cross_attention_dim=None,
@@ -1522,6 +1524,8 @@ class CustomDiffusionXFormersAttnProcessor(nn.Module):
     ):
         super().__init__()
         self.train_kv = train_kv
+        self.train_k = train_k
+        self.train_v = train_v
         self.train_q_out = train_q_out
 
         self.hidden_size = hidden_size
